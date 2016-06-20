@@ -8,10 +8,10 @@ Imports System.Runtime.InteropServices
 
 ' Review the values of the assembly attributes
 
-<Assembly: AssemblyTitle("WindowsApplication3")>
+<Assembly: AssemblyTitle("rule_search")>
 <Assembly: AssemblyDescription("")>
-<Assembly: AssemblyCompany("NASA ACES")>
-<Assembly: AssemblyProduct("WindowsApplication3")>
+<Assembly: AssemblyCompany("NASA")>
+<Assembly: AssemblyProduct("rule_search")>
 <Assembly: AssemblyCopyright("Copyright © NASA ACES 2016")>
 <Assembly: AssemblyTrademark("")>
 

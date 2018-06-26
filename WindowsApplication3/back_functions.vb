@@ -6,26 +6,38 @@ Module back_functions
     Public xlApp As New Excel.Application
     Public workBookOut As Excel.Workbook
 
-    Public Sub listSearch(ByVal IPlist As Array, ByVal any As Boolean)
+    Public Sub listSearch(ByVal IPlist As Array, ByVal any As Boolean, ByVal subnets As Boolean, ByVal searchGroups As Boolean, ByVal allGroupCheck As Boolean, ByVal resolve_check As Boolean, Optional ByVal SVClist As Array = Nothing)
         Dim allObjects As New List(Of String)
+        Dim objectReturn As New List(Of String)
         xlApp.SheetsInNewWorkbook = 1
         workBookOut = xlApp.Workbooks.Add()
-        For Each IP In IPlist
-            Dim names As New List(Of String)
-            Dim foundGroups As New List(Of String)
-            Dim currentObjects As New List(Of String)
-            Dim ruleIDs As New List(Of String)
-            Dim nameSearched As List(Of String) = nameSearch(IP, any)
-            If nameSearched IsNot Nothing Then names.AddRange(nameSearched)
-            Dim groupSearched As List(Of String) = groupSearch(names)
-            If groupSearched IsNot Nothing Then foundGroups.AddRange(groupSearched)
-            currentObjects = names.Union(foundGroups).ToList
-            allObjects = allObjects.Union(currentObjects).ToList
-            ruleIDs.AddRange(IDsearch(currentObjects, "both"))
+        For Each address In IPlist
+            If address IsNot "" Then
+                Dim IP As String = address.split("_")(0)
+                Dim cidr As String = address.split("_")(1)
+                Dim names As New List(Of String)
+                Dim foundGroups As New List(Of String)
+                Dim currentObjects As New List(Of String)
+                Dim ruleIDs As New List(Of String)
+                Dim nameSearched As List(Of String) = nameSearch(IP, cidr, any, subnets)
+                If nameSearched IsNot Nothing Then names.AddRange(nameSearched)
+                If searchGroups Then
+                    Dim groupSearched As List(Of String) = groupSearch(names)
+                    If groupSearched IsNot Nothing Then foundGroups.AddRange(groupSearched)
+                    currentObjects = names.Union(foundGroups).ToList
+                    allObjects = allObjects.Union(currentObjects).ToList
+                Else
+                    currentObjects = names
+                End If
+                ruleIDs.AddRange(IDsearch(currentObjects, "both"))
 
-            IPsheet(ruleIDs, IP)
+                objectReturn = IPsheet(ruleIDs, currentObjects, IP)
+                If allGroupCheck Then allObjects = allObjects.Union(objectReturn).ToList
+            End If
         Next
-        groupSheet(allObjects)
+
+        If searchGroups Then groupSheet(allObjects, resolve_check)
+
         Try
             xlApp.Visible = True
         Catch
@@ -34,13 +46,14 @@ Module back_functions
         End Try
     End Sub
 
-    Public Sub ruleDump(ByVal any As Boolean)
+    Public Sub ruleDump(ByVal any As Boolean, ByVal resolve_check As Boolean)
         Dim allObjects As New List(Of String)
         allObjects = addressNames.Union(groups).ToList
         xlApp.SheetsInNewWorkbook = 1
         workBookOut = xlApp.Workbooks.Add
-        IPsheet("all", "rules")
-        groupSheet(allObjects)
+        IPsheet("all", "dickbutt", "rules")
+        groupSheet(allObjects, resolve_check)
+        serviceSheet(services, serviceGroup)
         Try
             xlApp.Visible = True
         Catch
@@ -49,7 +62,8 @@ Module back_functions
         End Try
     End Sub
 
-    Public Sub SRC_DSTsearch(ByVal source As String, ByVal destination As String, ByVal any As Boolean)
+    Public Sub SRC_DSTsearch(ByVal source As String, ByVal destination As String, ByVal any As Boolean, ByVal subnets As Boolean, ByVal allGroupCheck As Boolean, ByVal resolve_check As Boolean)
+        Dim objectReturn As New List(Of String)
         Dim allObjects As New List(Of String)
         Dim srcObjects As New List(Of String)
         Dim dstObjects As New List(Of String)
@@ -61,7 +75,7 @@ Module back_functions
         If extractValidIP(source) IsNot Nothing Then
             which += 1
             srcObjects.Clear()
-            Dim srcSearched As List(Of String) = nameSearch(source, any)
+            Dim srcSearched As List(Of String) = nameSearch(source, "32", any, subnets)
             If srcSearched IsNot Nothing Then srcObjects.AddRange(srcSearched)
             Dim srcGRPsearched As List(Of String) = groupSearch(srcObjects)
             If srcGRPsearched IsNot Nothing Then srcObjects = srcObjects.Union(srcGRPsearched).ToList
@@ -73,10 +87,10 @@ Module back_functions
         If extractValidIP(destination) IsNot Nothing Then
             which += 10
             dstObjects.Clear()
-            Dim dstSearched As List(Of String) = nameSearch(destination, any)
+            Dim dstSearched As List(Of String) = nameSearch(destination, "32", any, subnets)
             If dstSearched IsNot Nothing Then dstObjects.AddRange(dstSearched)
             Dim dstGRPsearched As List(Of String) = groupSearch(dstObjects)
-            If dstGRPsearched IsNot Nothing Then dstObjects = dstObjects.Union(dstSearched).ToList
+            If dstGRPsearched IsNot Nothing Then dstObjects = dstObjects.Union(dstGRPsearched).ToList
             dstIDs.AddRange(IDsearch(dstObjects, "destination"))
         End If
 
@@ -92,8 +106,9 @@ Module back_functions
             matchedIDs = srcIDs.Intersect(dstIDs).ToList
         End If
 
-        IPsheet(matchedIDs, "Relevant Rules")
-        groupSheet(allObjects)
+        objectReturn = IPsheet(matchedIDs, allObjects, "Relevant Rules")
+        If allGroupCheck Then allObjects = allObjects.Union(objectReturn).ToList
+        groupSheet(allObjects, resolve_check)
         Try
             xlApp.Visible = True
         Catch
@@ -108,6 +123,8 @@ Module back_functions
             Return excelLoad(fName)
         ElseIf fType Is "fortiConf" Then
             Return fortiLoad(fName)
+        ElseIf fType Is "ssgConf" Then
+            Return ssgLoad(fName)
         Else
             Return Nothing
         End If
@@ -134,6 +151,7 @@ Module back_functions
     ' 0 = service name, 1 = protocol type, 2 = protocol number, 3 = tcp source, 4 = tcp dest,
     ' 5 = udp source, 6 = udp dest
     Public services As New List(Of List(Of String))
+    Public serviceGroup As New List(Of List(Of String))
 
 
     ' open excel file in order to fill the public variables
@@ -235,8 +253,8 @@ Module back_functions
 
     End Function
 
-    ' open conf file from Fortinets
-    Private Function fortiLoad(ByVal confName As String)
+    ' open conf file from Juniper
+    Private Function ssgLoad(ByVal confName As String)
         addressNames.Clear()
         addresses.Clear()
         masks.Clear()
@@ -253,10 +271,88 @@ Module back_functions
         services.Clear()
 
         Dim lines() As String = IO.File.ReadAllLines(confName)
+
+        ' 0= none, 1 = address section, 2 = group section, 3 = policy section, 4 = service section
+        Dim section As Integer = 0
+        Dim lineSplit() As String
+
+        ' counting variables for policy filling
+        Dim max As New Integer
+        Dim srcZNcount As New Integer
+        Dim dstZNcount As New Integer
+        Dim srcCount As New Integer
+        Dim dstCount As New Integer
+        Dim svcCount As New Integer
+        Dim serviceIndex As Integer = 0
+        For Each line As String In lines
+
+
+
+
+            ' address section - gather address names, IPs, and masks
+            If section = 1 Then
+
+            End If
+
+            ' group section - gather groups and members
+            If section = 2 Then
+
+            End If
+
+            ' policy section - gather rule details
+            If section = 3 Then
+                If line Like vbTab & vbTab & ": (*" Then
+                    policyID.Add(line.Split("(")(1))
+                End If
+
+            End If
+
+            ' service section - gather defined services
+            ' 0 = service name, 1 = protocol type, 2 = source port, 3 = destination port
+            If section = 4 Then
+
+            End If
+
+            If line Like vbTab & ":*" Then section = 0
+
+            ' check for section
+            If section = 0 Then
+                If line Like vbTab & ":address (" Then
+                    section = 1
+                ElseIf line Like vbTab & ":addrgroup (" Then
+                    section = 2
+                ElseIf line Like vbTab & ":policy (" Then
+                    section = 3
+                End If
+            End If
+        Next
+        Return confName
+    End Function
+
+    ' open conf file from Fortinets
+    Private Function fortiLoad(ByVal confName As String)
+        addressNames.Clear()
+        addresses.Clear()
+        masks.Clear()
+        groups.Clear()
+        groupMembers.Clear()
+        policyID.Clear()
+        policySRCzone.Clear()
+        policyDSTzone.Clear()
+        policySRC.Clear()
+        policyDST.Clear()
+        policySVC.Clear()
+        policyACT.Clear()
+        policyLOG.Clear()
+        services.Clear()
+        serviceGroup.Clear()
+
+        Dim lines() As String = IO.File.ReadAllLines(confName)
         Dim addressSection As Boolean = False
         Dim groupSection As Boolean = False
         Dim policySection As Boolean = False
         Dim serviceSection As Boolean = False
+        Dim serviceGRPsection As Boolean = False
         Dim lineSplit() As String
         ' counting variables for policy filling
         Dim max As New Integer
@@ -265,16 +361,39 @@ Module back_functions
         Dim srcCount As New Integer
         Dim dstCount As New Integer
         Dim svcCount As New Integer
-        Dim serviceIndex As New Integer
+        Dim logCount As New Integer
+        Dim serviceIndex As Integer = 0
+        Dim backCount As Integer = 0
+        Dim serviceGRPindex As Integer = 0
+
+
         For Each line As String In lines
             ' gather address names, IPs, and masks
             line = line.Trim
             If addressSection Then
                 If line Like "edit*" Then addressNames.Add(line.Split("""")(1))
-                If line Like "set subnet*" Then
-                    addresses.Add(line.Split(" ")(2))
-                    masks.Add(line.Split(" ")(3))
+                If line Like "set type geography" Then
+                    masks.Add("geography")
                 End If
+                If line Like "set country*" Then
+                    addresses.Add("Country code: " + line.Split(" ")(2))
+                    Dim test = 0
+                End If
+                If line Like "set type fqdn" Then
+                    masks.Add("fqdn")
+                End If
+                If line Like "set fqdn*" Then
+                    addresses.Add(line.Split(" ")(2))
+                    Dim test = 0
+                End If
+                If line Like "set type iprange*" Then
+                    addresses.Add("0.0.0.0")
+                    masks.Add("255.255.255.255")
+                End If
+                If line Like "set subnet*" Then
+                        addresses.Add(line.Split(" ")(2))
+                        masks.Add(line.Split(" ")(3))
+                    End If
                 If line Like "next*" Then
                     If addresses.Count <> addressNames.Count Then
                         addresses.Add("")
@@ -282,9 +401,10 @@ Module back_functions
                     End If
                 End If
                 If line Like "end" Then addressSection = False
-            End If
-            ' gather groups and members
-            If groupSection Then
+                End If
+
+                ' gather groups and members
+                If groupSection Then
                 If line Like "edit*" Then groups.Add(line.Split("""")(1))
                 If line Like "set member*" Then
                     lineSplit = line.Split("""")
@@ -302,6 +422,7 @@ Module back_functions
             If policySection Then
                 If line Like "edit*" Then
                     policyID.Add(line.Split(" ")(1))
+                    If policyID.Last = "405" Then Dim bleh = "bleh"
                     max = 1
                 End If
 
@@ -372,7 +493,10 @@ Module back_functions
                     End If
                 End If
 
-                If line Like "set logtraffic *" Then policyLOG.Add(line.Split(" ")(2))
+                If line Like "set logtraffic *" Then
+                    policyLOG.Add(line.Split(" ")(2))
+                    logCount = 1
+                End If
 
                 If line Like "next" Then
                     If max > srcZNcount Then
@@ -400,21 +524,32 @@ Module back_functions
                             policySVC.Add("")
                         Next
                     End If
+                    If max > logCount Then
+                        For index As Integer = 1 To (max - logCount)
+                            policyLOG.Add("")
+                        Next
+                    End If
                     If policyACT.Count < policyID.Count Then policyACT.Add("deny")
+
                     For index As Integer = 1 To (max - 1)
                         policyACT.Add(policyACT.Last)
                         policyID.Add(policyID.Last)
-                        policyLOG.Add(policyLOG.Last)
                     Next
+                    srcZNcount = 0
+                    dstZNcount = 0
+                    srcCount = 0
+                    dstCount = 0
+                    svcCount = 0
+                    logCount = 0
+                End If
+                
+                    If line Like "end" Then policySection = False
                 End If
 
-                If line Like "end" Then policySection = False
-            End If
-
-            ' 0 = service name, 1 = protocol type, 2 = protocol number, 3 = tcp source, 4 = tcp dest,
-            ' 5 = udp source, 6 = udp dest
-            If serviceSection Then
-                If line Like "edit *" Then
+                ' 0 = service name, 1 = protocol type, 2 = protocol number, 3 = tcp source, 4 = tcp dest,
+                ' 5 = udp source, 6 = udp dest
+                If serviceSection Then
+                If line Like "edit*" Then
                     services.Add(New List(Of String))
                     services(serviceIndex).AddRange({line.Split("""")(1), "noProtType", "noProtNum", "noTCPsrc",
                                                     "noTCPdest", "noUDPsrc", "noUDPdest"})
@@ -423,42 +558,97 @@ Module back_functions
                 If line Like "set protocol-number *" Then services(serviceIndex)(2) = line.Split(" ")(2)
                 If line Like "set tcp-portrange *" Then
                     Dim whole = line.Remove(0, 18)
-                    If whole Like "*:*" Then
-                        services(serviceIndex)(3) = whole.Split(":")(1)
-                        services(serviceIndex)(4) = whole.Split(":")(0)
-                    Else
-                        services(serviceIndex)(4) = whole
-                    End If
+                    Dim parts = whole.split(" ")
+                    Dim partCount As Int32 = 0
+                    While parts.length > partCount
+                        If parts(partCount) Like "*:*" Then
+                            services(serviceIndex)(3) = parts(partCount).Split(":")(1)
+                            services(serviceIndex)(4) = parts(partCount).Split(":")(0)
+                        Else
+                            services(serviceIndex)(4) = parts(partCount)
+                        End If
+                        If (parts.length - partCount) > 1 Then
+                            services.Add(New List(Of String))
+                            serviceIndex += 1
+                            Dim prevName = services(serviceIndex - 1)(0)
+                            services(serviceIndex).AddRange({prevName, "noProtType", "noProtNum", "noTCPsrc",
+                                                    "noTCPdest", "noUDPsrc", "noUDPdest"})
+                        End If
+                        partCount += 1
+                    End While
                 End If
                 If line Like "set udp-portrange *" Then
+                    While services(serviceIndex).Item(0) Like """"
+                        serviceIndex -= 1
+                        backCount += 1
+                    End While
                     Dim whole = line.Remove(0, 18)
-                    If whole Like "*:*" Then
-                        services(serviceIndex)(5) = whole.Split(":")(1)
-                        services(serviceIndex)(6) = whole.Split(":")(0)
-                    Else
-                        services(serviceIndex)(6) = whole
-                    End If
+                    Dim parts = whole.split(" ")
+                    Dim partCount As Int32 = 0
+                    While parts.length > partCount
+                        If parts(partCount) Like "*:*" Then
+                            services(serviceIndex)(5) = parts(partCount).Split(":")(1)
+                            services(serviceIndex)(6) = parts(partCount).Split(":")(0)
+                        Else
+                            services(serviceIndex)(6) = parts(partCount)
+                        End If
+                        If (parts.length - partCount) > 1 Then
+                            serviceIndex += 1
+                            If backCount > 0 Then backCount -= 1
+                            If services.Count <= serviceIndex Then
+                                services.Add(New List(Of String))
+                                Dim prevName = services(serviceIndex - 1)(0)
+                                services(serviceIndex).AddRange({prevName, "noProtType", "noProtNum", "noTCPsrc",
+                                                    "noTCPdest", "noUDPsrc", "noUDPdest"})
+                            End If
+                        End If
+                        partCount += 1
+                    End While
                 End If
-                Dim bleh = "bleh"
-                If line Like "next" Then serviceIndex += 1
+                If line Like "next" Then
+                    serviceIndex += backCount
+                    serviceIndex += 1
+                    backCount = 0
+                End If
                 If line Like "end" Then serviceSection = False
+            End If
+
+            ' gather service groups
+            If serviceGRPsection Then
+                If line Like "edit*" Then
+                    serviceGroup.Add(New List(Of String))
+                    serviceGroup(serviceGRPindex).Add(line.Split("""")(1))
                 End If
+                If line Like "set member*" Then
+                    lineSplit = line.Split("""")
+                    For Each item In lineSplit
+                        If Not item Like " " And Not item Like "set member " Then
+                            serviceGroup(serviceGRPindex).Add(item)
+                        End If
+                    Next
+                End If
+                If line Like "next" Then serviceGRPindex += 1
+                If line Like "end" Then serviceGRPsection = False
+            End If
 
 
-                ' check for section
-                If line Like "config firewall address" Then addressSection = True
+            ' check for section
+            If line Like "config firewall address" Then addressSection = True
             If line Like "config firewall addrgrp" Then groupSection = True
             If line Like "config firewall policy" Then policySection = True
             If line Like "config firewall service custom" Then
-                serviceIndex = 0
                 serviceSection = True
+                backCount = 0
             End If
+            If line Like "config firewall service group" Then serviceGRPsection = True
 
         Next
         Return confName
     End Function
     ' make a new worksheet and fill with relevant rules
-    Private Sub IPsheet(ByVal IDlist, ByVal sheetName)
+    Private Function IPsheet(ByVal IDlist, ByVal actualContainers, ByVal sheetName)
+        Dim mentionedObjects As New List(Of String)
+
         Dim worksheet As Excel.Worksheet
         worksheet = workBookOut.Worksheets.Add()
         worksheet.Name = sheetName
@@ -483,7 +673,7 @@ Module back_functions
         Dim nextDSTzoneIndex As Integer = 0
         For Each ID In policyID
             If lastID <> ID And found Then
-                worksheet.Cells.EntireRow.Item(rowIndex).Interior.ColorIndex = 16
+                worksheet.Cells.EntireRow.Item(rowIndex).Interior.ColorIndex = 44 '16
                 rowIndex += 1
                 lastSRCzone = ""
                 lastDSTzone = ""
@@ -512,7 +702,11 @@ Module back_functions
                 lastDSTzone = policyDSTzone(IDindex)
                 worksheet.Cells.Item(rowIndex, 1) = policyID.Item(IDindex)
                 worksheet.Cells.Item(rowIndex, 4) = policySRC(IDindex)
+                mentionedObjects.Add(policySRC(IDindex))
+                If actualContainers.contains(policySRC(IDindex)) And policySRC(IDindex) IsNot "" Then worksheet.Cells.Item(rowIndex, 4).Interior.ColorIndex = 6
                 worksheet.Cells.Item(rowIndex, 5) = policyDST(IDindex)
+                mentionedObjects.Add(policyDST(IDindex))
+                If actualContainers.contains(policyDST(IDindex)) And policyDST(IDindex) IsNot "" Then worksheet.Cells.Item(rowIndex, 5).Interior.ColorIndex = 6
                 worksheet.Cells.Item(rowIndex, 6) = policySVC(IDindex)
                 worksheet.Cells.Item(rowIndex, 7) = policyACT(IDindex)
                 worksheet.Cells.Item(rowIndex, 8) = policyLOG(IDindex)
@@ -522,14 +716,23 @@ Module back_functions
             IDindex += 1
         Next
         worksheet.Columns.EntireColumn.AutoFit()
-    End Sub
+
+        Return mentionedObjects.Distinct.ToList
+    End Function
 
     ' make a worksheet and fill it with an exploded view of all mentioned groups
-    Private Sub groupSheet(ByVal groupList)
+    Private Sub groupSheet(ByVal groupList, ByVal resolve)
         Dim worksheet As Excel.Worksheet
         worksheet = workBookOut.Worksheets.Item(xlApp.Worksheets.Count)
-        worksheet.Name = "Address Groups"
+        If resolve Then
+            worksheet.Name = "Address Groups(Names)"
+        Else
+            worksheet.Name = "Address Groups"
+        End If
+
         Dim columnIndex As Int32 = 1
+        Dim addrIndex As Int32 = 0
+        Dim IPstring As String = ""
         For Each grp In groupList
             Dim rowIndex As Int32 = 1
             worksheet.Cells.Item(rowIndex, columnIndex) = grp
@@ -546,6 +749,101 @@ Module back_functions
         worksheet.Cells.EntireRow.Item(1).Font.Bold = True
         worksheet.Cells.EntireRow.Item(1).Borders.LineStyle = 1
         worksheet.Cells.EntireRow.Item(1).Borders.Weight = 2
+        worksheet.Columns.EntireColumn.AutoFit()
+
+        If resolve Then
+            worksheet = workBookOut.Worksheets.Add()
+            worksheet.Name = "Address Groups(IPs)"
+            workBookOut.Worksheets("Address Groups(IPs)").Move(after:=workBookOut.Worksheets("Address Groups(Names)"))
+            columnIndex = 1
+            addrIndex = 0
+            IPstring = ""
+            For Each grp2 In groupList
+                Dim rowIndex As Int32 = 1
+                worksheet.Cells.Item(rowIndex, columnIndex) = grp2
+                Dim found As Boolean = False
+                For index As Int32 = 0 To groups.Count - 1
+                    If groups.Item(index).Equals(grp2) Then
+                        rowIndex += 1
+
+                        If Not groups.Contains(groupMembers.Item(index)) Then
+                            addrIndex = addressNames.IndexOf(groupMembers.Item(index))
+                            If Not masks(addrIndex) Like "geography" And Not masks(addrIndex) Like "fqdn" Then
+                                Dim bin As String = extractValidIP(masks(addrIndex), True)
+                                Dim CIDRmask As String = bin.Split("1").Count - 1
+                                IPstring = addresses.Item(addrIndex) + "/" + CIDRmask
+                            Else
+                                IPstring = addresses.Item(addrIndex)
+                            End If
+                        Else
+                            IPstring = groupMembers.Item(index)
+                        End If
+
+                        worksheet.Cells.Item(rowIndex, columnIndex) = IPstring
+                        found = True
+                    End If
+                Next
+                If found Then columnIndex += 1
+            Next
+            worksheet.Cells.EntireRow.Item(1).Font.Bold = True
+            worksheet.Cells.EntireRow.Item(1).Borders.LineStyle = 1
+            worksheet.Cells.EntireRow.Item(1).Borders.Weight = 2
+            worksheet.Columns.EntireColumn.AutoFit()
+        End If
+    End Sub
+
+    Private Sub serviceSheet(ByVal serviceList, ByVal serviceGroups)
+        Dim worksheet As Excel.Worksheet
+        worksheet = workBookOut.Worksheets.Add()
+        worksheet.Name = "Services"
+        workBookOut.Worksheets("Services").Move(after:=workBookOut.Worksheets.Item(xlApp.Worksheets.Count))
+        worksheet.Cells.Item(1, 1) = "Service Name"
+        worksheet.Cells.Item(1, 2) = "Protocol"
+        worksheet.Cells.Item(1, 3) = "Protocol number"
+        worksheet.Cells.Item(1, 4) = "TCP source"
+        worksheet.Cells.Item(1, 5) = "TCP destination"
+        worksheet.Cells.Item(1, 6) = "UDP source"
+        worksheet.Cells.Item(1, 7) = "UDP destination"
+        worksheet.Cells.EntireRow.Item(1).font.bold = True
+        For count As Int32 = 1 To 7
+            worksheet.Cells.Item(1, count).borders.linestyle = 1
+            worksheet.Cells.Item(1, count).borders.weight = 2
+        Next
+        Dim rowIndex As Int32 = 2
+        For Each service In serviceList
+            Dim name = service.item(0)
+            Dim protocol = service.item(1)
+            Dim protNum = service.item(2)
+            Dim TCPsrc = service.item(3)
+            Dim TCPdest = service.item(4)
+            Dim UDPsrc = service.item(5)
+            Dim UDPdest = service.item(6)
+            worksheet.Cells.Item(rowIndex, 1) = name
+            If Not protocol Like "noProtType" Then worksheet.Cells.Item(rowIndex, 2) = protocol
+            If Not protNum Like "noProtNum" Then worksheet.Cells.Item(rowIndex, 3) = protNum
+            If Not TCPsrc Like "noTCPsrc" Then worksheet.Cells.Item(rowIndex, 4) = TCPsrc
+            If Not TCPdest Like "noTCPdest" Then worksheet.Cells.Item(rowIndex, 5) = TCPdest
+            If Not UDPsrc Like "noUDPsrc" Then worksheet.Cells.Item(rowIndex, 6) = UDPsrc
+            If Not UDPdest Like "noUDPdest" Then worksheet.Cells.Item(rowIndex, 7) = UDPdest
+            rowIndex += 1
+        Next
+        worksheet.Columns.EntireColumn.AutoFit()
+
+        worksheet = workBookOut.Worksheets.Add()
+        worksheet.Name = "Service Groups"
+        workBookOut.Worksheets("Service Groups").Move(after:=workBookOut.Worksheets("Services"))
+
+        Dim columnIndex As New Integer
+        columnIndex = 1
+        For Each grp In serviceGroups
+            rowIndex = 1
+            For Each member In grp
+                worksheet.Cells.Item(rowIndex, columnIndex) = member
+                If rowIndex = 1 Then worksheet.Cells.Item(rowIndex, columnIndex).font.bold = True
+                rowIndex += 1
+            Next
+            columnIndex += 1
+        Next
         worksheet.Columns.EntireColumn.AutoFit()
     End Sub
 
@@ -579,7 +877,7 @@ Module back_functions
     End Function
 
     ' check an IP to gather what address objects contain it
-    Private Function nameSearch(ByVal searchIP, ByVal any)
+    Private Function nameSearch(ByVal searchIP, ByVal CIDRin, ByVal any, ByVal subnets)
         Dim found As Boolean
         Dim ADDindex As Int16 = 0
         Dim CIDRmask As String
@@ -588,10 +886,11 @@ Module back_functions
             found = False
             'If masks(ADDindex) Is "255.255.255.255" Then
             'If address Is searchIP Then found = True
-            If masks(ADDindex) IsNot "" Then
+            If masks(ADDindex) IsNot "" And masks(ADDindex) IsNot "fqdn" And masks(ADDindex) IsNot "geography" Then
                 Dim bin As String = extractValidIP(masks(ADDindex), True)
                 CIDRmask = bin.Split("1").Count - 1
-                If isIPinSubnet(searchIP, address, CIDRmask) Then found = True
+                If searchIP Like address AndAlso CIDRin Like CIDRmask Then found = True
+                If subnets And isIPinSubnet(searchIP, address, CIDRmask) Then found = True
                 If Not any Then
                     If masks(ADDindex) Like "0.0.0.0" Then found = False
                 End If
@@ -599,7 +898,7 @@ Module back_functions
             If found Then relevantNames.Add(addressNames(ADDindex))
             ADDindex += 1
         Next
-        If any Then relevantNames.add("all")
+        If any Then relevantNames.Add("all")
         Return relevantNames
     End Function
 

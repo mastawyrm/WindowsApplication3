@@ -74,7 +74,8 @@
         If fileBox.Text Like "*.xlsx" Then fType = "excel"
         If fileBox.Text Like "*.csv" Then fType = "csv"
         If My.Computer.FileSystem.FileExists(fileBox.Text) Then
-            If vdomBox.SelectedIndex = (vdomBox.Items.Count - 1) Then
+            test = vdomBox.Items(0)
+            If vdomBox.Items(0) IsNot "" And vdomBox.SelectedIndex = (vdomBox.Items.Count - 1) Then
                 For Each vdom In vdoms
                     loadedFile = loadFile(fileBox.Text, fType, vdom, vdoms)
                     If loadedFile IsNot Nothing Then

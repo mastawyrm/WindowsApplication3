@@ -477,12 +477,9 @@ Module back_functions
                     If line Like "next*" Then
                         If addresses.Count <> addressNames.Count Then
                             addresses.Add("")
-                        End If
-                        If addresses.Count > masks.Count Then
                             masks.Add("")
                         End If
                     End If
-
                     If line Like "end" Then addressSection = False
                 End If
 
@@ -628,7 +625,7 @@ Module back_functions
                         Next
 
                         If sourceNegate Then
-                            For index As Integer = (policyID.Count - max) To (policyID.Count - dstCount)
+                            For index As Integer = (policyID.Count - max) To (policyID.Count - max + dstCount - 1)
                                 Dim bleh = policySRC(index)
                             Next
                         End If
@@ -906,7 +903,7 @@ Module back_functions
 
                         If Not groups.Contains(groupMembers.Item(index)) Then
                             addrIndex = addressNames.IndexOf(groupMembers.Item(index))
-                            If Not masks(addrIndex) Like "geography" And Not masks(addrIndex) Like "fqdn" Then
+                            If Not masks(addrIndex) Like "geography" And Not masks(addrIndex) Like "fqdn" And Not masks(addrIndex) Like "" Then
                                 Dim bin As String = extractValidIP(masks(addrIndex), True)
                                 Dim CIDRmask As String = bin.Split("1").Count - 1
                                 IPstring = addresses.Item(addrIndex) + "/" + CIDRmask
